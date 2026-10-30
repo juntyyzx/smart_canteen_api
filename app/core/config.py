@@ -43,6 +43,7 @@ class Settings:
     min_history_days: int = 14
     seed_on_startup: bool = True
     seed_demo_history: bool = True
+    seed_demo_stock: bool = True  # начальные демо-остатки склада; в load_settings по умолчанию выключено
     seed_admin_password: Optional[str] = None
     seed_cook_password: Optional[str] = None
     seed_economist_password: Optional[str] = None
@@ -69,6 +70,8 @@ def load_settings() -> Settings:
         min_history_days=_int("MIN_HISTORY_DAYS", 14),
         seed_on_startup=_bool("SEED_ON_STARTUP", True),
         seed_demo_history=_bool("SEED_DEMO_HISTORY", not prod),
+        # Остатки склада вводит повар сам: по умолчанию склад стартует пустым (SEED_DEMO_STOCK=true вернёт демо-остатки)
+        seed_demo_stock=_bool("SEED_DEMO_STOCK", False),
         seed_admin_password=dev("SEED_ADMIN_PASSWORD", "admin12345"),
         seed_cook_password=dev("SEED_COOK_PASSWORD", "cook12345"),
         seed_economist_password=dev("SEED_ECONOMIST_PASSWORD", "economist12345"),

@@ -59,7 +59,7 @@ def _seed_users(db, settings: Settings) -> int:
     return created
 
 
-def _seed_menu(db) -> dict:
+def _seed_menu(db, demo_stock: bool = True) -> dict:
     stats = {"categories": 0, "ingredients": 0, "dishes": 0}
     cats = {c.slug: c for c in db.scalars(select(Category)).all()}
     for slug, name, description, order in CATEGORIES:
@@ -81,7 +81,7 @@ def _seed_menu(db) -> dict:
         db.add(ing)
         db.flush()
         db.add(IngredientPriceHistory(ingredient_id=ing.id, purchase_price=row["price"], price_unit=row["price_unit"]))
-        if row["stock"] > 0:
+        if demo_stock and row["stock"] > 0:
             apply_movement(db, ing, "adjustment", row["stock"], reason="Демонстрационный начальный остаток")
         ings[ing.slug] = ing
         stats["ingredients"] += 1
@@ -179,7 +179,7 @@ def run_seed(session_factory, settings: Settings) -> dict:
     with session_factory() as db:
         with transaction(db):
             result["users_created"] = _seed_users(db, settings)
-            result.update(_seed_menu(db))
+            result.update(_seed_menu(db, settings.seed_demo_stock))
         if settings.seed_demo_history and db.get(AppMeta, DEMO_FLAG) is None:
             with transaction(db):
                 result["demo_history"] = _seed_demo_history(db)

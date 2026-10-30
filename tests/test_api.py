@@ -51,8 +51,8 @@ def test_05_recipes_are_correct_and_linked(client, admin):
     assert by_name["Рис"] == 100 and by_name["Говядина"] == 100 and by_name["Морковь"] == 60
     assert recipe["is_demo"] is True
     costing = client.get(f"/api/dishes/{ids['plov']}/costing", headers=admin).json()["data"]
-    assert D(costing["ingredient_cost_per_portion"]) == Dc("66.95")
-    assert D(costing["gross_difference_per_portion"]) == Dc("63.05")
+    assert D(costing["ingredient_cost_per_portion"]) == Dc("101.73")
+    assert D(costing["gross_difference_per_portion"]) == Dc("83.27")
     # готовый закупаемый товар: связь с одной позицией закупки, без выдуманной рецептуры
     candy = client.get(f"/api/dishes/{ids['candy-portion']}/recipe", headers=admin).json()["data"]
     assert len(candy["items"]) == 1 and candy["items"][0]["quantity_per_portion"] == 30
@@ -64,7 +64,7 @@ def test_06_order_with_several_items_and_money(client, tomorrow):
     assert r.status_code == 201
     order = r.json()["data"]
     assert order["status"] == "confirmed" and len(order["items"]) == 3
-    assert D(order["total_amount"]) == Dc("438.00")      # 3×130 + 2×20 + 8
+    assert D(order["total_amount"]) == Dc("603.00")      # 3×185 + 2×20 + 8
     assert order["currency"] == "KGS"
     assert order["public_order_number"].startswith("SC-")
 
@@ -74,7 +74,7 @@ def test_07_order_keeps_price_snapshot(client, economist, admin, tomorrow):
     pid = dish_ids(client)["plov"]
     assert client.patch(f"/api/dishes/{pid}", json={"sale_price": "200.00"}, headers=economist).status_code == 200
     again = client.get(f"/api/orders/{order['id']}", headers=admin).json()["data"]
-    assert D(again["items"][0]["unit_sale_price"]) == Dc("130.00") and D(again["total_amount"]) == Dc("260.00")
+    assert D(again["items"][0]["unit_sale_price"]) == Dc("185.00") and D(again["total_amount"]) == Dc("370.00")
 
 
 def test_08_cancel_order_is_idempotent(client, cook, admin, tomorrow):
@@ -137,9 +137,9 @@ def test_12_procurement_for_120_portions(client, economist, tomorrow):
     # нужно 12000 г, на складе (демо) 8000 г -> чистая потребность 4000 г -> 4 упаковки по 1 кг
     assert beef["available_quantity"] == 8000 and beef["net_need"] == 4000
     assert beef["package_count"] == 4 and beef["purchase_quantity"] == 4000
-    assert D(beef["estimated_cost"]) == Dc("2080.00")            # 4000 г × 0.52
+    assert D(beef["estimated_cost"]) == Dc("3200.00")            # 4000 г × 0.8
     assert "4 уп." in beef["explanation"]
-    assert D(rep["total_estimated_cost"]) == Dc("2080.00") and rep["total_is_complete"] is True
+    assert D(rep["total_estimated_cost"]) == Dc("3200.00") and rep["total_is_complete"] is True
 
 
 def test_13_same_ingredient_summed_across_dishes_and_zero_purchase(client, economist, tomorrow):
@@ -236,10 +236,10 @@ def test_19_production_consumption_waste_and_analytics(client, cook, admin, tomo
     assert r.status_code == 201
     data = r.json()["data"]
     assert data["leftover_portions"] == 2 and data["stock_consumed"] is True
-    assert D(data["waste_cost"]) == Dc("200.85")                    # 3 × 66.95
+    assert D(data["waste_cost"]) == Dc("305.19")                    # 3 × 101.73
     assert stock_of(client, admin, "rice") == 18000                 # 20 × 100 г списано
     waste = client.get("/api/analytics/waste", params={"from": today, "to": today, "include_demo": "true"}, headers=admin).json()["data"]
-    assert D(waste["total_waste_cost"]) == Dc("200.85") and D(waste["waste_percent_of_prepared"]) == Dc("15.00")
+    assert D(waste["total_waste_cost"]) == Dc("305.19") and D(waste["waste_percent_of_prepared"]) == Dc("15.00")
     assert waste["by_dish"][0]["dish_name"] == "Плов" and waste["cost_is_complete"] is True
     # сырой ингредиент: запись + движение waste
     ing = ingredient_ids(client, cook)["tomato"]
@@ -337,3 +337,50 @@ def test_25_analytics_separates_demo_from_real(demo_client):
     only_real = demo_client.post("/api/procurement-plan/preview", json={"date": target, "include_demo": False},
                                  headers=auth(demo_client, "economist")).json()["data"]
     assert only_real["total_portions"] == 0
+
+
+# ---------------------------------------------------------------- ручной ввод остатков поваром
+def test_set_stock_by_cook(client, cook, economist):
+    ids = ingredient_ids(client, cook)
+    r = client.put("/api/inventory/stock", headers=cook, json={"items": [
+        {"ingredient_id": ids["rice"], "quantity": "12345.5"}, {"ingredient_id": ids["beef"], "quantity": "0"}]})
+    assert r.status_code == 200, r.text
+    assert stock_of(client, cook, "rice") == 12345.5 and stock_of(client, cook, "beef") == 0
+    # без изменений движение не создаётся
+    again = client.put("/api/inventory/stock", headers=cook, json={"items": [{"ingredient_id": ids["rice"], "quantity": "12345.5"}]})
+    assert again.status_code == 200 and again.json()["meta"]["count"] == 0
+    # ввод фиксируется движением с причиной
+    moves = client.get("/api/inventory/movements", params={"ingredient_id": ids["rice"], "movement_type": "adjustment"}, headers=cook).json()["data"]
+    assert moves[0]["reason"] and moves[0]["balance_after"] == 12345.5
+    # валидация и права
+    assert client.put("/api/inventory/stock", headers=cook, json={"items": [{"ingredient_id": ids["rice"], "quantity": "-1"}]}).status_code == 422
+    dup = client.put("/api/inventory/stock", headers=cook, json={"items": [
+        {"ingredient_id": ids["rice"], "quantity": "1"}, {"ingredient_id": ids["rice"], "quantity": "2"}]})
+    assert dup.status_code == 422
+    assert client.put("/api/inventory/stock", headers=economist, json={"items": [{"ingredient_id": ids["rice"], "quantity": "1"}]}).status_code == 403
+    assert client.put("/api/inventory/stock", json={"items": [{"ingredient_id": ids["rice"], "quantity": "1"}]}).status_code == 401
+    # неизвестный ингредиент -> ничего не меняется
+    bad = client.put("/api/inventory/stock", headers=cook, json={"items": [
+        {"ingredient_id": ids["rice"], "quantity": "777"}, {"ingredient_id": 999999, "quantity": "1"}]})
+    assert bad.status_code == 404 and stock_of(client, cook, "rice") == 12345.5
+
+
+def test_empty_stock_without_demo_stock(tmp_path):
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.conftest import auth, make_settings
+
+    with TestClient(create_app(replace(make_settings(tmp_path), seed_demo_stock=False))) as c:
+        rows = c.get("/api/inventory", headers=auth(c, "cook")).json()["data"]
+        assert rows and all(r["stock_quantity"] == 0 for r in rows)
+
+
+def test_postgres_url_is_normalized():
+    from app.database import normalize_db_url
+
+    assert normalize_db_url("postgres://u:p@h/db") == "postgresql+psycopg://u:p@h/db"
+    assert normalize_db_url("postgresql://u:p@h/db?sslmode=require") == "postgresql+psycopg://u:p@h/db?sslmode=require"
+    assert normalize_db_url("sqlite:///./x.db") == "sqlite:///./x.db"

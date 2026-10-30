@@ -81,3 +81,14 @@ class MovementOut(BaseModel):
     reference_id: Optional[int]
     reason: Optional[str]
     created_at: datetime
+
+
+class StockSetItem(BaseModel):
+    ingredient_id: int
+    quantity: Decimal = Field(ge=0, max_digits=14, decimal_places=3,
+                              description="Фактический остаток в единице учёта ингредиента (g, ml или pcs)")
+
+
+class StockSetIn(BaseModel):
+    items: list[StockSetItem] = Field(min_length=1, max_length=300)
+    reason: str = Field(default="Ручной ввод остатка поваром", min_length=3, max_length=300)

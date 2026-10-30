@@ -11,9 +11,21 @@ class Base(DeclarativeBase):
     type_annotation_map = {Decimal: DecimalText}
 
 
+def normalize_db_url(url: str) -> str:
+    """Render/Neon/Supabase отдают postgres://… или postgresql://…; SQLAlchemy нужен драйвер psycopg (v3)."""
+    url = url.strip()
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 def make_engine(url: str):
+    url = normalize_db_url(url)
     kwargs = {}
     is_sqlite = url.startswith("sqlite")
+    if not is_sqlite:
+        kwargs["pool_pre_ping"] = True  # бесплатные Postgres обрывают простаивающие соединения
     if is_sqlite:
         kwargs["connect_args"] = {"check_same_thread": False}
         if url in ("sqlite://", "sqlite:///:memory:"):

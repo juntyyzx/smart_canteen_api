@@ -8,7 +8,8 @@ from app.api.deps import STAFF, idempotency_key, require_roles
 from app.database import get_db
 from app.models import ROLE_COOK, ROLE_ECONOMIST
 from app.schemas.common import Envelope, ok
-from app.schemas.inventory import (AdjustmentIn, IngredientCreate, IngredientOut, IngredientPatch, MovementOut)
+from app.schemas.inventory import (AdjustmentIn, IngredientCreate, IngredientOut, IngredientPatch, MovementOut,
+                                   StockSetIn)
 from app.services import inventory_service as svc
 
 router = APIRouter(prefix="/api", tags=["ingredients & inventory"])
@@ -51,6 +52,13 @@ def adjustment(payload: AdjustmentIn, response: Response, db: Session = Depends(
         response.status_code = 200
         response.headers["Idempotent-Replay"] = "true"
     return ok(svc.movement_to_out(movement), created=created)
+
+
+@router.put("/inventory/stock", response_model=Envelope[list[IngredientOut]],
+            summary="Ввести фактические остатки склада (повар)")
+def set_stock(payload: StockSetIn, db: Session = Depends(get_db), _=Depends(require_roles(ROLE_COOK))):
+    data = [svc.ingredient_to_out(i) for i in svc.set_stock(db, payload)]
+    return ok(data, count=len(data))
 
 
 @router.get("/inventory/movements", response_model=Envelope[list[MovementOut]])

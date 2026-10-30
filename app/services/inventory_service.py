@@ -11,7 +11,8 @@ from app.core.utils import transaction
 from app.domain.money import qty
 from app.domain.units import UnitError, convert, is_compatible
 from app.models import MOVEMENT_TYPES, Ingredient, IngredientPriceHistory, InventoryMovement
-from app.schemas.inventory import (AdjustmentIn, IngredientCreate, IngredientOut, IngredientPatch, MovementOut)
+from app.schemas.inventory import (AdjustmentIn, IngredientCreate, IngredientOut, IngredientPatch, MovementOut,
+                                   StockSetIn)
 from app.services.calc_inputs import csv, price_per_base
 
 _POSITIVE = {"purchase", "return"}
@@ -153,6 +154,25 @@ def adjust(db: Session, payload: AdjustmentIn, header_key: Optional[str] = None)
         movement = apply_movement(db, ing, "adjustment", payload.quantity_delta, reason=payload.reason,
                                   reference_type="manual_adjustment", idempotency_key=key)
     return movement, True
+
+
+def set_stock(db: Session, payload: StockSetIn) -> list:
+    """Ставит фактические остатки (инвентаризация). Разница фиксируется движением «adjustment».
+    Всё или ничего: при любой ошибке остатки не меняются."""
+    ids = [i.ingredient_id for i in payload.items]
+    if len(ids) != len(set(ids)):
+        raise unprocessable("duplicate_ingredient", "Один и тот же ингредиент указан несколько раз")
+    changed = []
+    with transaction(db):
+        for item in payload.items:
+            ing = get_ingredient(db, item.ingredient_id)
+            delta = qty(item.quantity) - ing.stock_quantity
+            if delta != 0:
+                apply_movement(db, ing, "adjustment", delta, reason=payload.reason, reference_type="manual_stock_set")
+                changed.append(ing)
+    for ing in changed:
+        db.refresh(ing)
+    return changed
 
 
 def list_movements(db: Session, ingredient_id: Optional[int], movement_type: Optional[str],
