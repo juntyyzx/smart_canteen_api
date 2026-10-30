@@ -115,3 +115,16 @@ def test_plov_matches_documented_demo_recipe():
     lines = {s: q for s, q, _ in _parse(plov["recipe"])}
     assert lines["rice"] == 100 and lines["beef"] == 100 and lines["carrot"] == 60
     assert lines["onion"] == 20 and lines["oil"] == 15
+
+
+def test_decimal_type_uses_numeric_on_postgres():
+    from sqlalchemy import Numeric, String
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    from app.core.types import DecimalText
+
+    t = DecimalText()
+    assert isinstance(t.load_dialect_impl(postgresql.dialect()), Numeric)
+    assert isinstance(t.load_dialect_impl(sqlite.dialect()), String)
+    assert t.process_bind_param(Dc("1.5"), sqlite.dialect()) == "1.5"
+    assert t.process_bind_param(Dc("1.5"), postgresql.dialect()) == Dc("1.5")

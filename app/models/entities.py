@@ -218,7 +218,8 @@ class PurchasePlan(Base):
     __table_args__ = (
         # на одну дату — не более одного действующего (approved/received) плана
         Index("uq_active_plan_per_date", "plan_date", unique=True,
-              sqlite_where=text("status IN ('approved','received')")),
+              sqlite_where=text("status IN ('approved','received')"),
+              postgresql_where=text("status IN ('approved','received')")),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_date: Mapped[date] = mapped_column(Date, index=True)
